@@ -225,6 +225,7 @@
           `()))
       `())))
 
+
 (defn- lookup-matching-services-in-regions
   [session regions service-name service-version-major]
   (zipmap regions (map (fn [region]
@@ -235,19 +236,30 @@
                                     service-version-major)]
                            lu))
                        regions)))
-
+          
 (defn lookup-service
   "look up a set of service providers for one service"
   [session region-regexps-list service-name service-version-major]
-  (let [me "ME"
-        regions (lookup-matching-regions session region-regexps-list)]
-    (dbg session)
+  (let [regions (lookup-matching-regions session region-regexps-list)
+        services (map (fn [regs]
+                        (lookup-matching-services-in-regions session
+                                                             regs
+                                                             service-name
+                                                             service-version-major))
+                      regions)]
     (dbg region-regexps-list)
     (dbg service-name)
     (dbg service-version-major)
     (dbg regions)
+    (dbg services)
 ))
    
+;; (def ss (slogins `("DC1" "DC2")))
+;; (def c (client-login "localhost" "PROD" "RSI"))
+;; (doseq [s ss] (doseq [minor `(0 1 2)] (register-service s "mySpecialService" "1" minor "5" "http://localhost/mySpecialService")))
+;; (lookup-matching-services-in-regions @c `("DC1") "mySpecialService" "1")
+;; (lookup-service @c `("DC.*" ".*1$" ".*2$") "mySepcialService" "1")
+;;  (r-z (:client @c) '("/services"))
 
 
 
