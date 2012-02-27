@@ -1,5 +1,6 @@
 (ns clj-zoo.core
-  (:require [zookeeper :as zk] [clojure.zip :as zipper])
+  (:require [zookeeper :as zk] [clojure.zip :as zipper]
+	[clojure.string] [clojure.set])
   (:import [java.lang.Thread] [java.lang.management.ManagementFactory])
   (:gen-class))
 
@@ -169,11 +170,50 @@
   [keepers env app]
   (let [client (zk/connect keepers)
         app-base (app-in-env app env)
-        session (hash-map :client client :app-base app-base)]
+        session (hash-map :client client :app-base app-base :serv-to-load (hash-map))]
     (zk/create-all client (client-instance-base app env) :persistent? true)
     (zk/create client (str (client-instance-base app env) "/instance-")
                :sequential? true)
     (ref session)))
+
+(defn- add-serv-to-load
+  [session-ref server-path load]
+  (dosync
+        (let [session @session-ref s-t-l-map (:serv-to-load session)]
+	(assoc session :serv-to-load (assoc s-t-l-map server-path load)))))
+
+(defn- get-load
+  [session server-path]
+  (let [client (:client session)
+	data (zk/data client server-path)
+	data-s (String. (:data data) "UTF-8")
+	instance (second (clojure.string/split-lines data-s))
+	inst-data (zk/data client instance)
+	load (second (clojure.string/split-lines (String. (:data inst-data) "UTF-8")))]
+	(read-string load)))
+
+(defn- get-server-instance
+  [session service-path]
+  (let [client (:client session)
+	data (zk/data client service-path)
+	instance (second (clojure.string/split-lines
+		(String. (:data data) "UTF-8")))]
+	instance))
+
+(defn- get-service-load
+  [session service-path]
+  (let [instance (get-server-instance session service-path)]
+	(get-load session instance)))
+
+(defn my-union
+  [& args]
+  (let [cnt (count args)]
+	(if (= 0 cnt)
+		(hash-set)
+		(if (= cnt 1)
+			(hash-set (first args))
+			(clojure.set/union
+				 (first args) (hash-set (second args)))))))
 
 (defn- regions
   [session]
@@ -225,7 +265,6 @@
           `()))
       `())))
 
-
 (defn- lookup-matching-services-in-regions
   [session regions service-name service-version-major]
   (zipmap regions (map (fn [region]
@@ -236,42 +275,56 @@
                                     service-version-major)]
                            lu))
                        regions)))
-          
+
+
+(defn get-servers
+  "for a list of services, return set of servers"
+  [session services]
+  (distinct (map (fn [service]
+		(get-server-instance session service))
+		services)))
+
+(defn- get-services
+  [session regions service-name service-version-major]
+  (map (fn [regs]
+		(lookup-matching-services-in-regions
+			session
+			regs
+			service-name
+			service-version-major))
+	regions))
+
 (defn lookup-service
   "look up a set of service providers for one service"
-  [session region-regexps-list service-name service-version-major]
-  (let [regions (lookup-matching-regions session region-regexps-list)
-        services (map (fn [regs]
-                        (lookup-matching-services-in-regions session
-                                                             regs
-                                                             service-name
-                                                             service-version-major))
-                      regions)]
-    (dbg region-regexps-list)
-    (dbg service-name)
-    (dbg service-version-major)
-    (dbg regions)
-    (dbg services)
+  [session-ref region-regexps-list service-name service-version-major]
+  (let [session @session-ref
+	regions (lookup-matching-regions session region-regexps-list)
+        ;; services is a 'region -> services-list' map
+	services (get-services session regions service-name service-version-major)
+	server-instances (hash-set)]
+	
+	(println "+++++++++++++++++++++++")
+	(println (count services))
+	(doseq [regional services]
+		(println "-----------------------")
+		(println regional)
+		(doseq [key (keys regional)]
+			(println "      -----------------")
+			(println key)
+			(println (regional key))))
+	(println "=======================")
+	(println services)
+
 ))
    
 ;; (def ss (slogins `("DC1" "DC2")))
 ;; (def c (client-login "localhost" "PROD" "RSI"))
 ;; (doseq [s ss] (doseq [minor `(0 1 2)] (register-service s "mySpecialService" "1" minor "5" "http://localhost/mySpecialService")))
 ;; (lookup-matching-services-in-regions @c `("DC1") "mySpecialService" "1")
-;; (lookup-service @c `("DC.*" ".*1$" ".*2$") "mySepcialService" "1")
+;; (lookup-service @c `("DC.*" ".*1$" ".*2$") "mySpecialService" "1")
 ;;  (r-z (:client @c) '("/services"))
 
 
-
-  ;; (let [match-regions (lookup-matching-regions session region-regexps-list)]
-  ;;   (dbg match-regions)
-  ;;   (map (fn [region-regexps]
-  ;;          (lookup-matching-services-in-regions
-  ;;           session
-  ;;           (lookup-matching-regions session region-regexps)
-  ;;          service-name
-  ;;          service-version-major))
-  ;;        region-regexps-list)))
 
 (defn- slogins
   [regions]
