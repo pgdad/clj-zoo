@@ -147,6 +147,11 @@
   [services-map]
   (flatten (map (fn [key] (services-map key)) (keys services-map))))
 
+(defn- combined-regional-services
+  " SEQ( <map 'region' -> 'services' ) -> (lots of services' )"
+  [all-services]
+  (distinct (flatten (map (fn [regional] (regional-services regional)) all-services))))
+
 ;; (defn- services-for-all-regions
 ;;   "( maps of region -> services )"
 ;;   [reg-of-servs-maps]
@@ -158,7 +163,8 @@
 	regions (lookup-matching-regions session region-regexps-list)
         ;; services is a 'region -> services-list' map
 	services (get-services session regions service-name service-version-major)
-	server-instances (hash-set)]
+	server-instances (hash-set)
+	]
     
     (println "+++++++++++++++++++++++")
     (println (count services))
@@ -169,6 +175,7 @@
         (println "      -----------------")
         (println reg-services)))
     (println "=======================")
-    (println services)
+    (combined-regional-services services)
+;;    (println services)
 
     ))
