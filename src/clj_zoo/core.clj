@@ -2,7 +2,7 @@
   (:require [zookeeper :as zk] [clojure.zip :as zipper]
             [clojure.string] [clojure.set])
   (:import [java.lang.Thread] [java.lang.management.ManagementFactory])
-  (:use [clj-zoo.util] [clj-zoo.server])
+  (:use [clj-zoo.util] [clj-zoo.server] [clj-zoo.client])
   (:gen-class))
 
                                         ; session is map with keys:
@@ -25,7 +25,32 @@
 ;;  (r-z (:client @c) '("/services"))
 
 
+(def ^:dynamic *servers* (ref nil))
+(def ^:dynamic *client* (ref nil))
 
 (defn- slogins
   [regions]
   (map (fn [region] (server-login "localhost" "PROD" "RSI" region)) regions))
+
+(defn- setup-servers
+   []
+   (let [servers (slogins `("DC1" "DC2"))]
+	(doseq [s servers] (doseq [minor `(0 1 2)] (register-service s "mySpecialService" "1" minor "5" "http://localhost/mySpecialService")))
+	(dosync (alter *servers* (fn [& rest] servers)))))
+
+
+(defn- clogin
+   []
+   (let [c (client-login "localhost" "PROD" "RSI")]
+	(dosync (alter *client* (fn [& rest] c)))))
+
+(defn- cdo
+   []
+   (do
+	(clogin)
+	(lookup-service @*client* `("DC.*" ".*1$" ".*2$") "mySpecialService" "1")))
+
+(defn- rzdo
+   []
+   (r-z (:client @@*client*) `("/services")))
+
