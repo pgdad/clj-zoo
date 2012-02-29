@@ -104,17 +104,15 @@
                           (String. (:data data) "UTF-8")))]
     instance))
 
-(defn- get-load
+(defn get-load
   [session server-path]
   (let [client (:client session)
 	data (zk/data client server-path)
 	data-s (String. (:data data) "UTF-8")
-	instance (second (clojure.string/split-lines data-s))
-	inst-data (zk/data client instance)
-	load (second (clojure.string/split-lines (String. (:data inst-data) "UTF-8")))]
+	load (second (clojure.string/split-lines data-s))]
     (read-string load)))
 
-(defn- get-service-load
+(defn get-service-load
   [session service-path]
   (let [instance (get-server-instance session service-path)]
     (get-load session instance)))
@@ -155,7 +153,7 @@
 ;; (defn- services-for-all-regions
 ;;   "( maps of region -> services )"
 ;;   [reg-of-servs-maps]
-  
+
 (defn lookup-service
   "look up a set of service providers for one service"
   [session-ref region-regexps-list service-name service-version-major]
@@ -164,18 +162,11 @@
         ;; services is a 'region -> services-list' map
 	services (get-services session regions service-name service-version-major)
 	server-instances (hash-set)
+        combined-services (combined-regional-services services)
+        service-loads (map (fn [service-path]
+                             (get-service-load session service-path))
+                           combined-services)
 	]
     
-    (println "+++++++++++++++++++++++")
-    (println (count services))
-    (doseq [regional services]
-      (println "-----------------------")
-      (println regional)
-      (let [reg-services (regional-services regional)]
-        (println "      -----------------")
-        (println reg-services)))
-    (println "=======================")
-    (combined-regional-services services)
-;;    (println services)
-
-    ))
+    (zipmap combined-services service-loads)
+  ))
