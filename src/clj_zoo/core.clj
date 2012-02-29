@@ -33,24 +33,24 @@
   (map (fn [region] (server-login "localhost" "PROD" "RSI" region)) regions))
 
 (defn- setup-servers
-   []
-   (let [servers (slogins `("DC1" "DC2"))]
-	(doseq [s servers] (doseq [minor `(0 1 2)] (register-service s "mySpecialService" "1" minor "5" "http://localhost/mySpecialService")))
-	(dosync (alter *servers* (fn [& rest] servers)))))
+  []
+  (let [servers (slogins `("DC1" "DC2"))]
+    (doseq [s servers] (doseq [minor `(0 1 2)] (register-service s "mySpecialService" "1" minor "5" "http://localhost/mySpecialService")))
+    (dosync (alter *servers* (fn [& rest] servers)))))
 
 
 (defn- clogin
-   []
-   (let [c (client-login "localhost" "PROD" "RSI")]
-	(dosync (alter *client* (fn [& rest] c)))))
+  []
+  (let [c (client-login "localhost" "PROD" "RSI")]
+    (dosync (alter *client* (fn [& rest] c)))))
 
 (defn- cdo
-   []
-   (do
-	(clogin)
-	(lookup-service @*client* `("DC.*" ".*1$" ".*2$") "mySpecialService" "1")))
+  []
+  (do
+    (clogin)
+    (lookup-service @*client* `("DC.*" ".*1$" ".*2$") "mySpecialService" "1")))
 
 (defn- rzdo
-   []
-   (r-z (:client @@*client*) `("/services")))
+  []
+  (r-z (:client @@*client*) `("/services")))
 
