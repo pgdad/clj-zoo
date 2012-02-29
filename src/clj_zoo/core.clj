@@ -2,7 +2,7 @@
   (:require [zookeeper :as zk] [clojure.zip :as zipper]
             [clojure.string] [clojure.set])
   (:import [java.lang.Thread] [java.lang.management.ManagementFactory])
-  (:use [clj-zoo.util] [clj-zoo.server] [clj-zoo.client])
+  (:use [clj-zoo.util] [clj-zoo.server] [clj-zoo.client] [clj-zoo.servicewatcher])
   (:gen-class))
 
                                         ; session is map with keys:
@@ -41,14 +41,14 @@
 
 (defn- clogin
   []
-  (let [c (client-login "localhost" "PROD" "RSI")]
+  (let [c (client-login "localhost" "PROD" "RSI" `("DC.*" ".*1$" ".*2$"))]
     (dosync (alter *client* (fn [& rest] c)))))
 
 (defn- cdo
   []
   (do
     (clogin)
-    (lookup-service @*client* `("DC.*" ".*1$" ".*2$") "mySpecialService" "1")))
+    (lookup-service @*client* "mySpecialService" "1")))
 
 (defn- rzdo
   []
