@@ -14,12 +14,12 @@
   `(str ~app-base "/services/" ~region "/" ~service-name "/" ~service-version))
 
 (defn client-login
-  [keepers env app]
+  [keepers env app region-regexps]
   (let [client (zk/connect keepers)
         app-base (app-in-env app env)
         session (hash-map :client client
                           :app-base app-base
-                          :serv-to-load (hash-map))]
+                          :region-regexps region-regexps)]
     (zk/create-all client (client-instance-base app env) :persistent? true)
     (zk/create client (str (client-instance-base app env) "/instance-")
                :sequential? true)
@@ -96,7 +96,7 @@
         (clojure.set/union
          (first args) (hash-set (second args)))))))
 
-(defn- get-server-instance
+(defn get-server
   [session service-path]
   (let [client (:client session)
 	data (zk/data client service-path)
@@ -114,14 +114,14 @@
 
 (defn get-service-load
   [session service-path]
-  (let [instance (get-server-instance session service-path)]
+  (let [instance (get-server session service-path)]
     (get-load session instance)))
 
 (defn get-servers
   "for a list of services, return set of servers"
   [session services]
   (distinct (map (fn [service]
-                   (get-server-instance session service))
+                   (get-server session service))
                  services)))
 
 (defn- get-services
@@ -133,12 +133,6 @@
           service-name
           service-version-major))
        regions))
-
-(defn- add-serv-to-load
-  [session-ref server-path load]
-  (dosync
-   (let [session @session-ref s-t-l-map (:serv-to-load session)]
-     (assoc session :serv-to-load (assoc s-t-l-map server-path load)))))
 
 (defn- regional-services
   "( <map 'region' -> 'services' ) => ( 'services from all regions' )"
@@ -156,9 +150,10 @@
 
 (defn lookup-service
   "look up a set of service providers for one service"
-  [session-ref region-regexps-list service-name service-version-major]
+  [session-ref service-name service-version-major]
   (let [session @session-ref
-	regions (lookup-matching-regions session region-regexps-list)
+	region-regexps (:region-regexps session)
+	regions (lookup-matching-regions session region-regexps)
         ;; services is a 'region -> services-list' map
 	services (get-services session regions service-name service-version-major)
 	server-instances (hash-set)
