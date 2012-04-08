@@ -156,12 +156,15 @@
 	regions (lookup-matching-regions session region-regexps)
         ;; services is a 'region -> services-list' map
 	services (get-services session regions service-name service-version-major)
-	server-instances (hash-set)
         combined-services (combined-regional-services services)
         service-loads (map (fn [service-path]
                              (get-service-load session service-path))
                            combined-services)
+	server-instances (map
+                          (fn [service] (get-server session service))
+                          combined-services)
 	]
     
-    (zipmap combined-services service-loads)
+    (zipmap (zipmap server-instances  service-loads)
+            (zipmap server-instances combined-services))
   ))

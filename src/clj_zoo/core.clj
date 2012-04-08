@@ -54,3 +54,5 @@
   []
   (r-z (:client @@*client*) `("/services")))
 
+(defn- login
+  [keepers])
