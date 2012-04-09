@@ -23,6 +23,31 @@
   [serviceroot app env]
   `(str (app-in-env ~serviceroot ~app ~env) "/createpassive"))
 
+(defmacro request-passivation-region-base
+  [serviceroot app env region]
+  `(str (app-in-env ~serviceroot ~app ~env) "/requestpassivation"))
+
+(defmacro request-activation-region-base
+  [serviceroot app env region]
+  `(str (app-in-env ~serviceroot ~app ~env) "/requestactivation"))
+
+(defmacro request-passivation-node
+  [serviceroot app env region active-node]
+  `(let [service-base# (service-region-base ~serviceroot ~app ~env ~region)
+	service-part# (clojure.string/replace-first ~active-node
+			(str (app-in-env ~serviceroot ~app ~env) "/services") "")]
+	 (str (request-passivation-region-base ~serviceroot ~app ~env ~region)
+		service-part#)))
+
+
+(defmacro request-activation-node
+  [serviceroot app env region passive-node]
+  `(let [service-base# (service-region-base ~serviceroot ~app ~env ~region)
+	service-part# (clojure.string/replace-first ~passive-node
+			(str (app-in-env ~serviceroot ~app ~env) "/passiveservices") "")]
+	 (str (request-activation-region-base ~serviceroot ~app ~env ~region)
+		service-part#)))
+
 (defmacro passive-service-node-pattern
   [serviceroot app env region name major minor micro]
   `(str (passivated-region-base ~serviceroot ~app ~env ~region)
@@ -136,6 +161,59 @@
 	client (:client @session)]
 	(zk/create-all client node-name :sequential? true)))
 	
+(defn- activate
+  [session name major minor micro url passive-node]
+  (println "CALLED -activate")
+  )
+
+(defn -watch-for-activate
+  [session name major minor micro url passive-node event]
+  (println (str "WATCH FOR ACTIVATE: " event))
+  )
+
+(defn- passivate
+  [session name major minor micro url active-node event]
+  (println (str "CALLED passivate: " event))
+  (if (= (:event-type event) :NodeCreated)
+	(let [created-node (:path event)
+		other (println "IN PASS LET")
+		client (:client @session)
+		other2 (println "IN PASS LET")
+		active-data (zk/data client active-node)
+		other3 (println "IN PASS LET")
+		node (create-service-node session true
+			name major minor micro)
+		other4 (println "IN PASS LET")
+		data-ver (:version (zk/exists client node))]
+		(println (str "IN PASS LET post dataver: " data-ver))
+		(println (str "-created-node: " created-node))
+		(try
+		(zk/set-data client node active-data data-ver)
+		(catch Exception e (println (str "EX in PASS" e))))
+		(println (str "PASSIAVATE CREATED NODE: " node))
+		(zk/delete client active-node)
+		(println (str "PASSIVATE DELETED NODE: " active-node))))
+  )
+
+
+(defn- watch-for-passivate
+  [session name major minor micro url active-node]
+  (println "WATCH FOR PASSIVATE")
+  (let [client (:client @session)
+	active-exists (zk/exists client active-node)]
+	(if active-exists 
+		(let [passivate-node (request-passivation-node
+					(:serviceroot @session)
+					(:app @session)
+					(:env @session)
+					(:region @session)
+					active-node)]
+			(println (str "-- WAITFOR passivate node: " passivate-node))
+			(zk/exists client passivate-node
+				:watcher (partial passivate session name major
+						minor micro url
+						active-node))))))
+
 (defn registerService
   [session serviceName major minor micro url]
   (let [client (:client @session)
@@ -161,7 +239,14 @@
                  (.getBytes (str "1\n" server-node "\n" url "\n") "UTF-8") service-data-version)
     (dosync
      (alter session add-service-to-session
-	{service-node {:url url :passive cre-passivated}}))))
+	{service-node {:url url :passive cre-passivated}}))
+    (if cre-passivated
+	;; start watching for activate request
+	true
+	;; else start watching for passivate requests
+	(watch-for-passivate session serviceName major minor micro url service-node))
+	
+))
 
 (defn unregisterService
   [session service-node]
