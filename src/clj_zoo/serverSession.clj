@@ -1,5 +1,6 @@
 (ns clj-zoo.serverSession
-  (:require [clj-zoo.session :as session] [zookeeper :as zk])
+  (:require [clj-zoo.session :as session]
+	[clj-zoo.watchFor :as wf] [zookeeper :as zk])
   (:gen-class :constructors {[String String String String] [],
                              [String String String String String] []}
               :state state
@@ -16,11 +17,16 @@
 
 (defmacro passivated-region-base
   [serviceroot app env region]
-  `(str (app-in-env ~serviceroot ~app ~env) "/passiveservices" ~region))
+  `(str (app-in-env ~serviceroot ~app ~env) "/passiveservices/" ~region))
 
 (defmacro create-passive-base
   [serviceroot app env]
-  `(str (app-in-env ~serviceroot ~app ~env) "/cratepassive"))
+  `(str (app-in-env ~serviceroot ~app ~env) "/createpassive"))
+
+(defmacro passive-service-node-pattern
+  [serviceroot app env region name major minor micro]
+  `(str (passivated-region-base ~serviceroot ~app ~env ~region)
+	"/" ~name  "/" ~major "/" ~minor "/" ~micro "/instance-"))
 
 (defmacro passivate-request-base
   [serviceroot app env region])
@@ -95,7 +101,7 @@
         new-services (dissoc services service-node)]
     (assoc session :services new-services)))
 
-(defn create-passiveated?
+(defn- create-passivated?
   [session service]
   (let [client (:client @session)
         serviceroot (:serviceroot @session)
@@ -105,27 +111,57 @@
     (zk/exists client passivate-node))
   )
 
+(defn- create-service-node
+  "create either passive or active node"
+  [session passivated? name major minor micro]
+  (let [node-name (if passivated?
+			(passive-service-node-pattern
+				(:serviceroot @session)
+				(:app @session)
+				(:env @session)
+				(:region @session)
+				name
+				major
+				minor
+				micro)
+			(service-node-pattern
+				(:serviceroot @session)
+				(:app @session)
+				(:env @session)
+				(:region @session)
+				name
+				major
+				minor
+				micro))
+	client (:client @session)]
+	(zk/create-all client node-name :sequential? true)))
+	
 (defn registerService
-  [session serviceName versionMajor versionMinor versionMicro url]
+  [session serviceName major minor micro url]
   (let [client (:client @session)
+	cre-passivated (create-passivated? session serviceName)
         node-name (service-node-pattern (:serviceroot @session)
                                         (:app @session)
                                         (:env @session)
                                         (:region @session)
                                         serviceName
-                                        versionMajor
-                                        versionMinor
-                                        versionMicro)
-        service-node (zk/create-all
-                      client
-                      node-name
-                      :sequential? true)
+                                        major
+                                        minor
+                                        micro)
+        service-node (create-service-node
+			session
+			cre-passivated
+			serviceName
+			major
+			minor
+			micro)
         server-node (:instance @session)
         service-data-version (:version (zk/exists client service-node))]
     (zk/set-data client service-node
                  (.getBytes (str "1\n" server-node "\n" url "\n") "UTF-8") service-data-version)
     (dosync
-     (alter session add-service-to-session {service-node url}))))
+     (alter session add-service-to-session
+	{service-node {:url url :passive cre-passivated}}))))
 
 (defn unregisterService
   [session service-node]

@@ -1,4 +1,4 @@
-(ns clj-zoo.watch-for
+(ns clj-zoo.watchFor
   (:require [zookeeper :as zk])
   )
 
