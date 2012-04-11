@@ -39,6 +39,14 @@
      (str (request-passivation-region-base ~serviceroot ~app ~env ~region)
           service-part#)))
 
+(defn my-passivation-request-node
+  [active-node]
+  (let [node-parts (clojure.string/split active-node (re-pattern "/"))
+        serviceroot (str "/" (nth node-parts 1))
+        env (nth node-parts 2)
+        app (nth node-parts 3)
+        region (nth node-parts 5)]
+    (request-passivation-node serviceroot app env region active-node)))
 
 (defmacro request-activation-node
   [serviceroot app env region passive-node]
@@ -47,6 +55,15 @@
                                                      (str (app-in-env ~serviceroot ~app ~env) "/passiveservices") "")]
      (str (request-activation-region-base ~serviceroot ~app ~env ~region)
           service-part#)))
+
+(defn my-activation-request-node
+  [passive-node]
+  (let [node-parts (clojure.string/split passive-node (re-pattern "/"))
+        serviceroot (str "/" (nth node-parts 1))
+        env (nth node-parts 2)
+        app (nth node-parts 3)
+        region (nth node-parts 5)]
+    (request-activation-node serviceroot app env region passive-node)))
 
 (defmacro passive-service-node-pattern
   [serviceroot app env region name major minor micro]
@@ -79,7 +96,7 @@
     (/ (+ 1 (quot (* 10 l) 1)) 10)))
 
 (defn- load-updater
-  [client server-node prev-load-range]
+  [client host server-node prev-load-range]
   (loop [prev-range prev-load-range]
     (let [alive (.. client getState isAlive)
           node-exists (zk/exists client server-node)]
@@ -91,7 +108,7 @@
                  (not (== c-range prev-range)))
           (do
             (let [data-version (:version (zk/exists client server-node))
-                  data-bytes (.getBytes (str "1\n" c-load "\n") "UTF-8")]
+                  data-bytes (.getBytes (str "1\n" c-load "\n" host "\n") "UTF-8")]
               (zk/set-data client server-node data-bytes data-version))))
         (if (not (.. client getState isAlive)) (println "QUIT") (recur c-range))))))
 
@@ -99,9 +116,10 @@
   ([keepers env app region] (login keepers env app region "/services"))
   ([keepers env app region serviceroot]
      (let [client (session/login keepers)
+           host (.. java.net.InetAddress getLocalHost getHostName)
            server-node (server-node-pattern serviceroot app env region)
            instance (zk/create-all client server-node :sequential? true)]
-       (.start (Thread. (fn [] (load-updater client instance 0.0))))
+       (.start (Thread. (fn [] (load-updater client host instance 0.0))))
        (ref {:serviceroot serviceroot
              :env env
              :instance instance
