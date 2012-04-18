@@ -1,6 +1,6 @@
 # clj-zoo
 
-FIXME: write description
+Layer on top of zooker to define services.
 
 ## Usage
 

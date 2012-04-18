@@ -8,81 +8,79 @@
               ))
 
 (defmacro app-in-env
-  [serviceroot app env]
-  `(str ~serviceroot "/" ~env "/" ~app))
+  [app env]
+  `(str "/" ~env "/" ~app))
 
 (defmacro service-region-base
-  [serviceroot app env region]
-  `(str (app-in-env ~serviceroot ~app ~env) "/services/" ~region))
+  [app env region]
+  `(str (app-in-env ~app ~env) "/services/" ~region))
 
 (defmacro passivated-region-base
-  [serviceroot app env region]
-  `(str (app-in-env ~serviceroot ~app ~env) "/passiveservices/" ~region))
+  [app env region]
+  `(str (app-in-env ~app ~env) "/passiveservices/" ~region))
 
 (defmacro create-passive-base
-  [serviceroot app env]
-  `(str (app-in-env ~serviceroot ~app ~env) "/createpassive"))
+  [app env]
+  `(str (app-in-env ~app ~env) "/createpassive"))
 
 (defmacro request-passivation-region-base
-  [serviceroot app env region]
-  `(str (app-in-env ~serviceroot ~app ~env) "/requestpassivation"))
+  [app env region]
+  `(str (app-in-env ~app ~env) "/requestpassivation"))
 
 (defmacro request-activation-region-base
-  [serviceroot app env region]
-  `(str (app-in-env ~serviceroot ~app ~env) "/requestactivation"))
+  [app env region]
+  `(str (app-in-env ~app ~env) "/requestactivation"))
 
 (defmacro request-passivation-node
-  [serviceroot app env region active-node]
-  `(let [service-base# (service-region-base ~serviceroot ~app ~env ~region)
+  [app env region active-node]
+  `(let [service-base# (service-region-base ~app ~env ~region)
          service-part# (clojure.string/replace-first ~active-node
-                                                     (str (app-in-env ~serviceroot ~app ~env) "/services") "")]
-     (str (request-passivation-region-base ~serviceroot ~app ~env ~region)
+                                                     (str (app-in-env ~app ~env) "/services") "")]
+     (str (request-passivation-region-base ~app ~env ~region)
           service-part#)))
 
 (defn my-passivation-request-node
   [active-node]
   (let [node-parts (clojure.string/split active-node (re-pattern "/"))
-        serviceroot (str "/" (nth node-parts 1))
-        env (nth node-parts 2)
-        app (nth node-parts 3)
-        region (nth node-parts 5)]
-    (request-passivation-node serviceroot app env region active-node)))
+        env (nth node-parts 1)
+        app (nth node-parts 2)
+        region (nth node-parts 4)]
+    (request-passivation-node app env region active-node)))
 
 (defmacro request-activation-node
-  [serviceroot app env region passive-node]
-  `(let [service-base# (service-region-base ~serviceroot ~app ~env ~region)
+  [app env region passive-node]
+  `(let [service-base# (service-region-base ~app ~env ~region)
          service-part# (clojure.string/replace-first ~passive-node
-                                                     (str (app-in-env ~serviceroot ~app ~env) "/passiveservices") "")]
-     (str (request-activation-region-base ~serviceroot ~app ~env ~region)
+                                                     (str (app-in-env ~app ~env) "/passiveservices") "")]
+     (str (request-activation-region-base ~app ~env ~region)
           service-part#)))
 
 (defn my-activation-request-node
   [passive-node]
   (let [node-parts (clojure.string/split passive-node (re-pattern "/"))
-        serviceroot (str "/" (nth node-parts 1))
-        env (nth node-parts 2)
-        app (nth node-parts 3)
-        region (nth node-parts 5)]
-    (request-activation-node serviceroot app env region passive-node)))
+        env (nth node-parts 1)
+        app (nth node-parts 2)
+        region (nth node-parts 4)]
+    (request-activation-node app env region passive-node)))
 
 (defmacro passive-service-node-pattern
-  [serviceroot app env region name major minor micro]
-  `(str (passivated-region-base ~serviceroot ~app ~env ~region)
+  [app env region name major minor micro]
+  `(str (passivated-region-base ~app ~env ~region)
 	"/" ~name  "/" ~major "/" ~minor "/" ~micro "/instance-"))
 
 (defmacro passivate-request-base
-  [serviceroot app env region])
+  [app env region])
 
-(defmacro service-node-pattern [serviceroot app env region name major minor micro]
-  `(str (service-region-base ~serviceroot ~app ~env ~region)
+(defmacro service-node-pattern [app env region name major minor micro]
+  `(str (service-region-base ~app ~env ~region)
         "/" ~name "/" ~major "/" ~minor "/" ~micro "/instance-"))
 
 (defmacro server-region-base
-  [serviceroot app env region]
-  `(str (app-in-env ~serviceroot ~app ~env) "/servers/" ~region))
+  [app env region]
+  `(str (app-in-env ~app ~env) "/servers/" ~region))
 
-(defmacro server-node-pattern [serviceroot app env region]
-  `(str (server-region-base ~serviceroot ~app ~env ~region) "/instance-"))
+(defmacro server-node-pattern [app env region]
+  `(str (server-region-base ~app ~env ~region) "/instance-"))
 
 (defn- current-load
   []
@@ -113,21 +111,19 @@
         (if (not (.. client getState isAlive)) (println "QUIT") (recur c-range))))))
 
 (defn login
-  ([keepers env app region] (login keepers env app region "/services"))
-  ([keepers env app region serviceroot]
-     (let [client (session/login keepers)
-           host (.. java.net.InetAddress getLocalHost getHostName)
-           server-node (server-node-pattern serviceroot app env region)
-           instance (zk/create-all client server-node :sequential? true)]
-       (.start (Thread. (fn [] (load-updater client host instance 0.0))))
-       (ref {:serviceroot serviceroot
-             :env env
-             :instance instance
-             :region region
-             :client client
-             :services {}
-             :app app})
-       )))
+  [keepers env app region]
+  (let [client (session/login keepers)
+        host (.. java.net.InetAddress getLocalHost getHostName)
+        server-node (server-node-pattern app env region)
+        instance (zk/create-all client server-node :sequential? true)]
+    (.start (Thread. (fn [] (load-updater client host instance 0.0))))
+    (ref {:env env
+          :instance instance
+          :region region
+          :client client
+          :services {}
+          :app app})
+    ))
 
 (defn logout
   [session]
@@ -147,10 +143,9 @@
 (defn- create-passivated?
   [session service]
   (let [client (:client @session)
-        serviceroot (:serviceroot @session)
         app (:app @session)
         env (:env @session)
-        passivate-node (str (create-passive-base serviceroot app env) "/" service) ]
+        passivate-node (str (create-passive-base app env) "/" service) ]
     (zk/exists client passivate-node))
   )
 
@@ -159,7 +154,6 @@
   [session passivated? name major minor micro]
   (let [node-name (if passivated?
                     (passive-service-node-pattern
-                     (:serviceroot @session)
                      (:app @session)
                      (:env @session)
                      (:region @session)
@@ -168,7 +162,6 @@
                      minor
                      micro)
                     (service-node-pattern
-                     (:serviceroot @session)
                      (:app @session)
                      (:env @session)
                      (:region @session)
@@ -202,7 +195,6 @@
 	passive-exists (zk/exists client passive-node)]
     (if passive-exists 
       (let [activate-node (request-activation-node
-                           (:serviceroot @session)
                            (:app @session)
                            (:env @session)
                            (:region @session)
@@ -235,7 +227,6 @@
 	active-exists (zk/exists client active-node)]
     (if active-exists 
       (let [passivate-node (request-passivation-node
-                            (:serviceroot @session)
                             (:app @session)
                             (:env @session)
                             (:region @session)
@@ -249,8 +240,7 @@
   [session serviceName major minor micro url]
   (let [client (:client @session)
 	cre-passivated (create-passivated? session serviceName)
-        node-name (service-node-pattern (:serviceroot @session)
-                                        (:app @session)
+        node-name (service-node-pattern (:app @session)
                                         (:env @session)
                                         (:region @session)
                                         serviceName
@@ -287,5 +277,4 @@
      (alter session rm-service-from-session service-node))))
 
 (defn -init
-  ([keepers env app region serviceroot] [[] (login keepers env app region serviceroot)])
-  ([keepers env app region] [[]] (-init keepers env app region "/services")))
+  [keepers env app region] [[] (login keepers env app region)])
