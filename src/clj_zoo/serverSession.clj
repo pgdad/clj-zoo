@@ -93,6 +93,10 @@
     (+ 1 (quot l 1))
     (/ (+ 1 (quot (* 10 l) 1)) 10)))
 
+(defn- gen-instance-data-bytes
+  [c-load host]
+  (.getBytes (str "1\n" c-load "\n" host "\n") "UTF-8"))
+
 (defn- load-updater
   [client host server-node prev-load-range]
   (loop [prev-range prev-load-range]
@@ -106,7 +110,7 @@
                  (not (== c-range prev-range)))
           (do
             (let [data-version (:version (zk/exists client server-node))
-                  data-bytes (.getBytes (str "1\n" c-load "\n" host "\n") "UTF-8")]
+                  data-bytes (gen-instance-data-bytes c-load host)]
               (zk/set-data client server-node data-bytes data-version))))
         (if (not (.. client getState isAlive)) (println "QUIT") (recur c-range))))))
 
@@ -115,7 +119,10 @@
   (let [client (session/login keepers)
         host (.. java.net.InetAddress getLocalHost getHostName)
         server-node (server-node-pattern app env region)
-        instance (zk/create-all client server-node :sequential? true)]
+	c-load (current-load)
+	data-bytes (gen-instance-data-bytes c-load host)
+        instance (zk/create-all client server-node
+			:sequential? true :data data-bytes)]
     (.start (Thread. (fn [] (load-updater client host instance 0.0))))
     (ref {:env env
           :instance instance
@@ -151,7 +158,7 @@
 
 (defn- create-service-node
   "create either passive or active node"
-  [session passivated? name major minor micro]
+  [session passivated? data-bytes name major minor micro]
   (let [node-name (if passivated?
                     (passive-service-node-pattern
                      (:app @session)
@@ -170,7 +177,7 @@
                      minor
                      micro))
 	client (:client @session)]
-    (zk/create-all client node-name :sequential? true)))
+    (zk/create-all client node-name :sequential? true :data data-bytes)))
 
 (declare watch-for-passivate)
 
@@ -180,10 +187,8 @@
     (let [created-node (:path event)
           client (:client @session)
           passive-data (:data (zk/data client passive-node))
-          node (create-service-node session false
-                                    name major minor micro)
-          data-ver (:version (zk/exists client node))]
-      (zk/set-data client node passive-data data-ver)
+          node (create-service-node session false passive-data
+                                    name major minor micro)]
       (zk/delete client passive-node)
       (watch-for-passivate session name major minor micro url node)
       (zk/delete client created-node)))
@@ -210,10 +215,8 @@
     (let [created-node (:path event)
           client (:client @session)
           active-data (:data (zk/data client active-node))
-          node (create-service-node session true
-                                    name major minor micro)
-          data-ver (:version (zk/exists client node))]
-      (zk/set-data client node active-data data-ver)
+          node (create-service-node session true active-data
+                                    name major minor micro)]
       (zk/delete client active-node)
       (watch-for-activate session name major minor micro url node)
       (zk/delete client created-node))
