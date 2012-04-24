@@ -1,4 +1,4 @@
-(defproject clj-zoo "1.0.5"
+(defproject clj-zoo "1.0.6"
   :description "FIXME: write description"
   :dependencies [[org.clojure/clojure "1.3.0"] [zookeeper-clj "0.9.2"]]
   :repl-init clj-zoo.serverSession
