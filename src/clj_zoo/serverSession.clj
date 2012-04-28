@@ -250,17 +250,16 @@
                                         major
                                         minor
                                         micro)
+        server-node (:instance @session)
         service-node (create-service-node
                       session
                       cre-passivated
+                      (.getBytes (str "1\n" server-node "\n" url "\n") "UTF-8")
                       serviceName
                       major
                       minor
-                      micro)
-        server-node (:instance @session)
-        service-data-version (:version (zk/exists client service-node))]
-    (zk/set-data client service-node
-                 (.getBytes (str "1\n" server-node "\n" url "\n") "UTF-8") service-data-version)
+                      micro)]
+
     (dosync
      (alter session add-service-to-session
             {service-node {:url url :passive cre-passivated}}))

@@ -1,5 +1,5 @@
-(ns clj-zoo.test.core
-  (:use [clj-zoo.core])
+(ns clj-zoo.test.serverSession
+  (:use [clj-zoo.serverSession])
   (:use [clojure.test]))
 
 (deftest replace-me ;; FIXME: write
