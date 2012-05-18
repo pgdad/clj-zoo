@@ -15,17 +15,15 @@
   [region]
   `(str "/passiveservices/" ~region))
 
-(defmacro create-passive-base
-  []
-  "/createpassive")
+(def create-passive-base "/createpassive")
 
 (defmacro request-passivation-region-base
   [region]
-  `"/requestpassivation")
+  `(str "/requestpassivation/" ~region))
 
 (defmacro request-activation-region-base
   [region]
-  `"/requestactivation")
+  `(str "/requestactivation" ~region))
 
 (defmacro request-passivation-node
   [region active-node]
@@ -149,7 +147,7 @@
 (defn- create-passivated?
   [session service]
   (let [client (:client @session)
-        passivate-node (str (create-passive-base) "/" service) ]
+        passivate-node (str create-passive-base "/" service) ]
     (zk/exists client passivate-node))
   )
 
@@ -229,14 +227,13 @@
                                      active-node))))))
 
 (defn registerService
+  "returns the original zookeeper node created for this service
+   The node can change over time (is passivated/activate) but is unique
+   for the duration of the session. The original node can be used to
+   unregister the service."
   [session serviceName major minor micro url]
   (let [client (:client @session)
 	cre-passivated (create-passivated? session serviceName)
-        node-name (service-node-pattern (:region @session)
-                                        serviceName
-                                        major
-                                        minor
-                                        micro)
         server-node (:instance @session)
         service-node (create-service-node
                       session
@@ -249,21 +246,35 @@
 
     (dosync
      (alter session add-service-to-session
-            {service-node {:url url :passive cre-passivated}}))
+            {service-node {:url url
+                           :passive cre-passivated
+                           :name serviceName
+                           :current-node service-node
+                           :major major
+                           :minor minor
+                           :micro micro}}))
     (if cre-passivated
       ;; start watching for activate request
       (watch-for-activate session serviceName major minor micro url service-node)
       ;; else start watching for passivate requests
       (watch-for-passivate session serviceName major minor micro url service-node))
     
+    service-node
     ))
 
 (defn unregisterService
   [session service-node]
-  (let [client (:client @session)]
+  (let [client (:client @session)
+        service (:services @session)
+        current-node (:current-node (service service-node))]
     (zk/delete client service-node)
     (dosync
      (alter session rm-service-from-session service-node))))
+
+(defn unregisterAllServices
+  [session]
+  (doseq [service (keys (:services @session))]
+    (unregisterService session service)))
 
 (defn -init
   [keepers region] [[] (login keepers region)])
