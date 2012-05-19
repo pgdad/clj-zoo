@@ -7,6 +7,8 @@
               :init -init
               ))
 
+(def ^:const slash-re #"/")
+
 (defmacro service-region-base
   [region]
   `(str "/services/" ~region))
@@ -17,25 +19,20 @@
 
 (def create-passive-base "/createpassive")
 
-(defmacro request-passivation-region-base
-  [region]
-  `(str "/requestpassivation/" ~region))
+(def request-passivation-base "/requestpassivation")
 
-(defmacro request-activation-region-base
-  [region]
-  `(str "/requestactivation" ~region))
+(def request-activation-base "/requestactivation")
 
 (defmacro request-passivation-node
   [region active-node]
   `(let [service-base# (service-region-base ~region)
          service-part# (clojure.string/replace-first ~active-node
                                                      "/services" "")]
-     (str (request-passivation-region-base ~region)
-          service-part#)))
+     (str request-passivation-base service-part#)))
 
 (defn my-passivation-request-node
   [active-node]
-  (let [node-parts (clojure.string/split active-node (re-pattern "/"))
+  (let [node-parts (clojure.string/split active-node slash-re)
         region (nth node-parts 2)]
     (request-passivation-node region active-node)))
 
@@ -50,12 +47,11 @@
   `(let [service-base# (service-region-base ~region)
          service-part# (clojure.string/replace-first ~passive-node
                                                      "/passiveservices" "")]
-     (str (request-activation-region-base ~region)
-          service-part#)))
+     (str request-activation-base service-part#)))
 
 (defn my-activation-request-node
   [passive-node]
-  (let [node-parts (clojure.string/split passive-node (re-pattern "/"))
+  (let [node-parts (clojure.string/split passive-node slash-re)
         region (nth node-parts 2)]
     (request-activation-node region passive-node)))
 
