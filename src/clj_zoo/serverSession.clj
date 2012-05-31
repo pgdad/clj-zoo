@@ -1,6 +1,7 @@
 (ns clj-zoo.serverSession
   (:require [clj-zoo.session :as session]
             [clj-zoo.watchFor :as wf] [zookeeper :as zk])
+  (:import (org.apache.zookeeper ZooKeeper))
   (:gen-class :constructors {[String String String String] [],
                              [String String String String String] []}
               :state state
@@ -93,7 +94,7 @@
   (.getBytes (str "1\n" c-load "\n" host "\n") "UTF-8"))
 
 (defn- load-updater
-  [client host server-node prev-load-range]
+  [^ZooKeeper client host server-node prev-load-range]
   (loop [prev-range prev-load-range]
     (let [alive (.. client getState isAlive)
           node-exists (zk/exists client server-node)]
