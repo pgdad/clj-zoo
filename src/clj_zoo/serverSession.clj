@@ -1,6 +1,7 @@
 (ns clj-zoo.serverSession
   (:require [clj-zoo.session :as session]
-            [clj-zoo.watchFor :as wf] [zookeeper :as zk])
+            [clj-zoo.watchFor :as wf]
+            [org.clojars.pgdad.zookeeper :as zk])
   (:import (org.apache.zookeeper ZooKeeper))
   (:gen-class :constructors {[String String String String] [],
                              [String String String String String] []}

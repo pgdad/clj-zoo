@@ -1,5 +1,5 @@
 (ns clj-zoo.session
-  (:require [zookeeper :as zk]))
+  (:require [org.clojars.pgdad.zookeeper :as zk]))
 
 (defn login
   [keepers]

@@ -1,5 +1,5 @@
 (ns clj-zoo.watchFor
-  (:require [zookeeper :as zk])
+  (:require [org.clojars.pgdad.zookeeper :as zk])
   )
 
 (defn watcher-fn
