@@ -292,9 +292,5 @@
 (defn -unregisterAllServices [this]
   (unregisterAllServices (.state this)))
 
-(defn -deref
-  [this]
-  this)
-
 (defn -init
   [keepers region] [[] (login keepers region)])
