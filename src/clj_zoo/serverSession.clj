@@ -3,10 +3,14 @@
             [clj-zoo.watchFor :as wf]
             [org.clojars.pgdad.zookeeper :as zk])
   (:import (org.apache.zookeeper ZooKeeper))
-  (:gen-class :constructors {[String String String String] [],
-                             [String String String String String] []}
+  (:gen-class :constructors {[String String] []}
               :state state
-              :init -init
+              :init init
+              :implements [clojure.lang.IDeref]
+              :methods [[registerService [String int int int String] String]
+                        [unregisterService [String] void]
+                        [unregisterAllServices [] void]
+                        [logout [] void]]
               ))
 
 (def ^:const slash-re #"/")
@@ -130,6 +134,10 @@
 (defn logout
   [session]
   (zk/close (:client @session)))
+
+(defn -logout
+  [this]
+  (logout (.state this)))
 
 (defn- add-service-to-session
   [session service-def]
@@ -260,6 +268,10 @@
     service-node
     ))
 
+(defn -registerService [this serviceName major minor micro url]
+  (println (str (.state this) ":" serviceName ":" major ":" minor ":" micro ":" url))
+  (registerService (.state this) serviceName major minor micro url))
+
 (defn unregisterService
   [session service-node]
   (let [client (:client @session)
@@ -269,10 +281,20 @@
     (dosync
      (alter session rm-service-from-session service-node))))
 
+(defn -unregisterService [this service-node]
+  (unregisterService (.state this) service-node))
+
 (defn unregisterAllServices
   [session]
   (doseq [service (keys (:services @session))]
     (unregisterService session service)))
+
+(defn -unregisterAllServices [this]
+  (unregisterAllServices (.state this)))
+
+(defn -deref
+  [this]
+  this)
 
 (defn -init
   [keepers region] [[] (login keepers region)])
