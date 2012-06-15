@@ -269,7 +269,6 @@
     ))
 
 (defn -registerService [this serviceName major minor micro url]
-  (println (str (.state this) ":" serviceName ":" major ":" minor ":" micro ":" url))
   (registerService (.state this) serviceName major minor micro url))
 
 (defn unregisterService
