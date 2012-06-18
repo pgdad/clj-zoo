@@ -115,10 +115,14 @@
               (zk/set-data client server-node data-bytes data-version))))
         (if (not (.. client getState isAlive)) (println "QUIT") (recur c-range))))))
 
+(defn- my-host*
+  []
+  (.. java.net.InetAddress getLocalHost getHostName))
+
 (defn login
   [keepers region]
   (let [client (session/login keepers)
-        host (.. java.net.InetAddress getLocalHost getHostName)
+        host (my-host*)
         server-node (server-node-pattern region)
 	c-load (current-load)
 	data-bytes (gen-instance-data-bytes c-load host)
@@ -153,9 +157,19 @@
 (defn- create-passivated?
   [session service]
   (let [client (:client @session)
-        passivate-node (str create-passive-base "/" service) ]
-    (zk/exists client passivate-node))
-  )
+        host (my-host*)
+        region (:region @session)
+        passivate-service-node (str create-passive-base "/" service)
+        passivate-region-service-node (str create-passive-base "/_region/" region "/" service)
+        passivate-host-service-node (str create-passive-base "/_host/" host "/" service)
+        passivate-region-node (str create-passive-base "/_region/_all")
+        passivate-host-node (str create-passive-base "/_host/" host "/_all")]
+     (or (zk/exists client passivate-service-node)
+         (zk/exists client passivate-region-service-node)
+         (zk/exists client passivate-host-service-node)
+         (zk/exists client passivate-region-node)
+         (zk/exists client passivate-host-node))
+  ))
 
 (defn- create-service-node
   "create either passive or active node"
