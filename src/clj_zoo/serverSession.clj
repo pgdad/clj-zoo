@@ -190,7 +190,7 @@
                      major
                      minor
                      micro))
-	client (:client (:curator @session))]
+	client (:client @session)]
     (zk/create-all client node-name :sequential? true :data data-bytes)))
 
 (declare watch-for-passivate)
@@ -211,7 +211,7 @@
 
 (defn- watch-for-activate
   [session name major minor micro url passive-node]
-  (let [client (:client (:curator @session))
+  (let [client (:client @session)
 	passive-exists (zk/exists client passive-node)]
     (if passive-exists 
       (let [activate-node (request-activation-node
@@ -226,7 +226,7 @@
   [session name major minor micro url active-node event]
   (if (= (:event-type event) :NodeCreated)
     (let [created-node (:path event)
-          client (:client (:curator @session))
+          client (:client @session)
           active-data (:data (zk/data client active-node))
           node (create-service-node session true active-data
                                     name major minor micro)]
@@ -240,7 +240,7 @@
 (defn- watch-for-passivate
   [session name major minor micro url active-node]
   (let [fWork (:fWork @session)
-        client @session
+        client (:client @session)
 	active-exists (zk/exists client active-node)]
     (if active-exists 
       (let [passivate-node (request-passivation-node
