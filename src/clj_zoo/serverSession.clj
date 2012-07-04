@@ -121,7 +121,8 @@
 
 (defn login
   [keepers region]
-  (let [client (session/login keepers)
+  (let [c-session (session/login keepers)
+        client (:client @c-session)
         host (my-host*)
         server-node (server-node-pattern region)
 	c-load (current-load)
@@ -129,7 +130,8 @@
         instance (zk/create-all client server-node
 			:sequential? true :data data-bytes)]
     (.start (Thread. (fn [] (load-updater client host instance 0.0))))
-    (ref {:instance instance
+    (ref {:fWork (:fWork @c-session)
+          :instance instance
           :region region
           :client client
           :services {}})
@@ -137,7 +139,7 @@
 
 (defn logout
   [session]
-  (zk/close (:client @session)))
+  (session/logout session))
 
 (defn -logout
   [this]
@@ -156,7 +158,8 @@
 
 (defn- create-passivated?
   [session service]
-  (let [client (:client @session)
+  (let [fWork (:fWork @session)
+        client (:client @session)
         host (my-host*)
         region (:region @session)
         passivate-service-node (str create-passive-base "/" service)
@@ -187,7 +190,7 @@
                      major
                      minor
                      micro))
-	client (:client @session)]
+	client (:client (:curator @session))]
     (zk/create-all client node-name :sequential? true :data data-bytes)))
 
 (declare watch-for-passivate)
@@ -196,6 +199,7 @@
   [session name major minor micro url passive-node event]
   (if (= (:event-type event) :NodeCreated)
     (let [created-node (:path event)
+          fWork (:fWork @session)
           client (:client @session)
           passive-data (:data (zk/data client passive-node))
           node (create-service-node session false passive-data
@@ -207,7 +211,7 @@
 
 (defn- watch-for-activate
   [session name major minor micro url passive-node]
-  (let [client (:client @session)
+  (let [client (:client (:curator @session))
 	passive-exists (zk/exists client passive-node)]
     (if passive-exists 
       (let [activate-node (request-activation-node
@@ -222,7 +226,7 @@
   [session name major minor micro url active-node event]
   (if (= (:event-type event) :NodeCreated)
     (let [created-node (:path event)
-          client (:client @session)
+          client (:client (:curator @session))
           active-data (:data (zk/data client active-node))
           node (create-service-node session true active-data
                                     name major minor micro)]
@@ -235,7 +239,8 @@
 
 (defn- watch-for-passivate
   [session name major minor micro url active-node]
-  (let [client (:client @session)
+  (let [fWork (:fWork @session)
+        client @session
 	active-exists (zk/exists client active-node)]
     (if active-exists 
       (let [passivate-node (request-passivation-node
@@ -252,7 +257,8 @@
    for the duration of the session. The original node can be used to
    unregister the service."
   [session serviceName major minor micro url]
-  (let [client (:client @session)
+  (let [fWork (:fWork @session)
+        client (:client @session)
 	cre-passivated (create-passivated? session serviceName)
         server-node (:instance @session)
         service-node (create-service-node
