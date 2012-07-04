@@ -2,7 +2,8 @@
   (:require [clj-zoo.session :as session]
             [clj-zoo.watchFor :as wf]
             [org.clojars.pgdad.zookeeper :as zk])
-  (:import (org.apache.zookeeper ZooKeeper))
+  (:import (org.apache.zookeeper ZooKeeper CreateMode)
+           (com.netflix.curator.framework CuratorFramework))
   (:gen-class :constructors {[String String] []}
               :state state
               :init init
@@ -119,6 +120,10 @@
   []
   (.. java.net.InetAddress getLocalHost getHostName))
 
+(defn- create-all
+  [fWork mode node data]
+  (-> fWork .create (.withMode mode) .creatingParentsIfNeeded (.forPath node data)))
+
 (defn login
   [keepers region]
   (let [c-session (session/login keepers)
@@ -127,8 +132,9 @@
         server-node (server-node-pattern region)
 	c-load (current-load)
 	data-bytes (gen-instance-data-bytes c-load host)
-        instance (zk/create-all client server-node
-			:sequential? true :data data-bytes)]
+        instance (create-all (:fWork @c-session)
+                             CreateMode/EPHEMERAL_SEQUENTIAL
+                             server-node data-bytes)]
     (.start (Thread. (fn [] (load-updater client host instance 0.0))))
     (ref {:fWork (:fWork @c-session)
           :instance instance
