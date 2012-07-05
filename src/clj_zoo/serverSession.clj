@@ -1,6 +1,7 @@
 (ns clj-zoo.serverSession
   (:require [clj-zoo.session :as session]
             [clj-zoo.watchFor :as wf]
+            [clj-zoo.serverNode :as serverNode]
             [org.clojars.pgdad.zookeeper :as zk])
   (:import (org.apache.zookeeper ZooKeeper CreateMode)
            (com.netflix.curator.framework CuratorFramework))
@@ -77,69 +78,15 @@
   `(str (service-region-base ~region)
         "/" ~name "/" ~major "/" ~minor "/" ~micro "/instance-"))
 
-(defmacro server-region-base
-  [region]
-  `(str "/servers/" ~region))
-
-(defmacro server-node-pattern [region]
-  `(str (server-region-base ~region) "/instance-"))
-
-(defn- current-load
-  []
-  (. (java.lang.management.ManagementFactory/getOperatingSystemMXBean)
-     getSystemLoadAverage))
-
-(defn- load-range
-  [l]
-  (if (> l 1.00)
-    (+ 1 (quot l 1))
-    (/ (+ 1 (quot (* 10 l) 1)) 10)))
-
-(defn- gen-instance-data-bytes
-  [c-load host]
-  (.getBytes (str "1\n" c-load "\n" host "\n") "UTF-8"))
-
-(defn- load-updater
-  [^ZooKeeper client host server-node prev-load-range]
-  (loop [prev-range prev-load-range]
-    (let [alive (.. client getState isAlive)
-          node-exists (zk/exists client server-node)]
-      (Thread/sleep 5000)
-      (let [c-load (current-load)
-            c-range (load-range c-load)]
-        (if (and (.. client getState isAlive)
-                 (zk/exists client server-node)
-                 (not (== c-range prev-range)))
-          (do
-            (let [data-version (:version (zk/exists client server-node))
-                  data-bytes (gen-instance-data-bytes c-load host)]
-              (zk/set-data client server-node data-bytes data-version))))
-        (if (not (.. client getState isAlive)) (println "QUIT") (recur c-range))))))
-
-(defn- my-host*
-  []
-  (.. java.net.InetAddress getLocalHost getHostName))
-
-(defn- create-all
-  [fWork mode node data]
-  (-> fWork .create (.withMode mode) .creatingParentsIfNeeded (.forPath node data)))
-
 (defn login
   [keepers region]
   (let [c-session (session/login keepers)
-        client (:client @c-session)
-        host (my-host*)
-        server-node (server-node-pattern region)
-	c-load (current-load)
-	data-bytes (gen-instance-data-bytes c-load host)
-        instance (create-all (:fWork @c-session)
-                             CreateMode/EPHEMERAL_SEQUENTIAL
-                             server-node data-bytes)]
-    (.start (Thread. (fn [] (load-updater client host instance 0.0))))
+        server-node (serverNode/create (:fWork @c-session)
+                                       region)]
     (ref {:fWork (:fWork @c-session)
-          :instance instance
+          :instance server-node
           :region region
-          :client client
+          :client (:client @c-session)
           :services {}})
     ))
 
