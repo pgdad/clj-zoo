@@ -113,7 +113,7 @@
   [session service]
   (let [fWork (:fWork @session)
         client (:client @session)
-        host (my-host*)
+        host (serverNode/my-host*)
         region (:region @session)
         passivate-service-node (str create-passive-base "/" service)
         passivate-region-service-node (str create-passive-base "/_region/" region "/" service)

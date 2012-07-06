@@ -37,7 +37,7 @@
           (-> fWork .setData (.forPath server-node data-bytes))))
       (recur c-range))))
 
-(defn- my-host*
+(defn my-host*
   []
   (.. java.net.InetAddress getLocalHost getHostName))
 
