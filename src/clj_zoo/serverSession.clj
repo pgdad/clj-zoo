@@ -3,12 +3,14 @@
             [clj-zoo.watchFor :as wf]
             [clj-zoo.serverNode :as serverNode]
             [org.clojars.pgdad.zookeeper :as zk])
-  (:import (org.apache.zookeeper ZooKeeper CreateMode)
+  (:import (java.util LinkedHashMap)
+           (org.apache.zookeeper ZooKeeper CreateMode)
            (com.netflix.curator.framework CuratorFramework)
            (com.netflix.curator.x.discovery ServiceDiscoveryBuilder
                                             ServiceInstanceBuilder
                                             ServiceInstance
-                                            UriSpec))
+                                            UriSpec)
+           (com.netflix.curator.x.discovery.details JsonInstanceSerializer))
   (:gen-class :constructors {[String String] []}
               :state state
               :init init
@@ -139,17 +141,19 @@
   [fWork basePath region]
   (let [sdb (ServiceDiscoveryBuilder/builder (class {}))
         sd (-> sdb (.client fWork) (.basePath (str basePath region))
+               (.serializer (JsonInstanceSerializer.
+                             (class (LinkedHashMap.))))
                .build)]
     (.start sd)
     sd))
 
 (def sd-builder (memoize build-service-discovery))
 
-(defn- passivated-discovery
+(defn passivated-discovery
   [fWork region]
   (sd-builder fWork "/passivatedservices/" region))
 
-(defn- activated-discovery
+(defn activated-discovery
   [fWork region]
   (sd-builder fWork "/services/" region))
 
