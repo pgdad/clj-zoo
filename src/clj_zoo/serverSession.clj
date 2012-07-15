@@ -138,14 +138,17 @@
   ))
 
 (defn- build-service-discovery
-  [fWork basePath region]
-  (let [sdb (ServiceDiscoveryBuilder/builder (class {}))
-        sd (-> sdb (.client fWork) (.basePath (str basePath region))
-               (.serializer (JsonInstanceSerializer.
-                             (class (LinkedHashMap.))))
-               .build)]
-    (.start sd)
-    sd))
+  ([fWork path]
+     (let [sdb (ServiceDiscoveryBuilder/builder (class (LinkedHashMap.)))
+           sd (-> sdb (.client fWork) (.basePath path)
+                  (.serializer (JsonInstanceSerializer.
+                                (class (LinkedHashMap.))))
+                  .build)]
+       (.start sd)
+       sd))
+  ([fWork basePath region]
+     (build-service-discovery fWork (str basePath region)))
+  )
 
 (def sd-builder (memoize build-service-discovery))
 
