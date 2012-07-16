@@ -162,14 +162,14 @@
 
 (defn- create-instance-0
   "create either passive or active node"
-  [ssl? region server name major minor micro port uri]
+  [ssl? region server name major minor micro port uri url]
   (let [u-spec (UriSpec. (str "{scheme}://{address}:{port}" uri))
         si (-> (ServiceInstance/builder)
                (.name name)
                (.uriSpec u-spec)
                (.payload {:major major :minor minor
                           :micro micro :server server
-                          :region region}))
+                          :region region :url url}))
         si-with-port (if ssl? (.sslPort si port) (.port si port))]
     (.build si-with-port)))
 
@@ -300,7 +300,7 @@
    The node can change over time (is passivated/activate) but is unique
    for the duration of the session. The original node can be used to
    unregister the service."
-  [session ssl? serviceName major minor micro port uri]
+  [session ssl? serviceName major minor micro port uri url]
   (let [fWork (:fWork @session)
         client (:client @session)
 	cre-passivated (create-passivated? session serviceName)
@@ -313,7 +313,8 @@
                                     minor
                                     micro
                                     port
-                                    uri)]
+                                    uri
+                                    url)]
 
     (register-instance (activated-discovery fWork (:region @session)) instance)
     (dosync
