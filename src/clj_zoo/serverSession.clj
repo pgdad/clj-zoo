@@ -1,11 +1,12 @@
 (ns clj-zoo.serverSession
   (:require [clj-zoo.session :as session]
+            [clj-zoo.util :as util]
             [clj-zoo.watchFor :as wf]
-            [clj-zoo.serverNode :as serverNode]
-            [org.clojars.pgdad.zookeeper :as zk])
+            [clj-zoo.serverNode :as serverNode])
   (:import (java.util LinkedHashMap)
            (org.apache.zookeeper ZooKeeper CreateMode)
            (com.netflix.curator.framework CuratorFramework)
+           (com.netflix.curator.framework.api CuratorWatcher)
            (com.netflix.curator.x.discovery ServiceDiscoveryBuilder
                                             ServiceInstanceBuilder
                                             ServiceInstance
@@ -21,72 +22,29 @@
                         [logout [] void]]
               ))
 
-(def ^:const slash-re #"/")
+(defn- ->keyword
+  [key]
+  (if (keyword? key)
+    key
+    (keyword (if (.startsWith key ":") (.substring key 1) key))))
 
-(defmacro service-region-base
-  [region]
-  `(str "/services/" ~region))
+(defn- ->clj
+ [o]
+ (let [entries (.entrySet o)]
+   (reduce (fn [m [^String k v]]
+             (assoc m (->keyword k) v))
+           {} entries)))
 
-(defmacro passivated-region-base
-  [region]
-  `(str "/passiveservices/" ~region))
+(defn service->payload-map
+  [service]
+  (let [result (->clj (.getPayload service))]
+    (assoc result :id (.getId service))))
 
 (def create-passive-base "/createpassive")
 
 (def request-passivation-base "/requestpassivation")
 
 (def request-activation-base "/requestactivation")
-
-(defmacro request-passivation-node
-  [region active-node]
-  `(let [service-base# (service-region-base ~region)
-         service-part# (clojure.string/replace-first ~active-node
-                                                     "/services" "")]
-     (str request-passivation-base service-part#)))
-
-(defn my-passivation-request-node
-  [active-node]
-  (let [node-parts (clojure.string/split active-node slash-re)
-        region (nth node-parts 2)]
-    (request-passivation-node region active-node)))
-
-(defn request-passivation
-  [connection node]
-  (when (zk/exists connection node)
-    (zk/create-all connection (my-passivation-request-node node)
-                   :persistent? true)))
-
-(defmacro request-activation-node
-  [region passive-node]
-  `(let [service-base# (service-region-base ~region)
-         service-part# (clojure.string/replace-first ~passive-node
-                                                     "/passiveservices" "")]
-     (str request-activation-base service-part#)))
-
-(defn my-activation-request-node
-  [passive-node]
-  (let [node-parts (clojure.string/split passive-node slash-re)
-        region (nth node-parts 2)]
-    (request-activation-node region passive-node)))
-
-(defn request-activation
-  [connection node]
-  (when (zk/exists connection node)
-    (zk/create-all connection (my-activation-request-node node)
-                   :persistent? true)))
-
-(defn- service-full-path
-  [base region name id]
-  (str base "/" region "/" name "/" id))
-
-(defmacro passive-service-node-pattern
-  [region name major minor micro]
-  `(str (passivated-region-base ~region)
-	"/" ~name  "/" ~major "/" ~minor "/" ~micro "/instance-"))
-
-(defmacro service-node-pattern [region name major minor micro]
-  `(str (service-region-base ~region)
-        "/" ~name "/" ~major "/" ~minor "/" ~micro "/instance-"))
 
 (defn login
   [keepers region]
@@ -130,11 +88,11 @@
         passivate-host-service-node (str create-passive-base "/_host/" host "/" service)
         passivate-region-node (str create-passive-base "/_region/_all")
         passivate-host-node (str create-passive-base "/_host/" host "/_all")]
-     (or (zk/exists client passivate-service-node)
-         (zk/exists client passivate-region-service-node)
-         (zk/exists client passivate-host-service-node)
-         (zk/exists client passivate-region-node)
-         (zk/exists client passivate-host-node))
+     (or (util/exists? fWork passivate-service-node)
+         (util/exists? fWork passivate-region-service-node)
+         (util/exists? fWork passivate-host-service-node)
+         (util/exists? fWork passivate-region-node)
+         (util/exists? fWork passivate-host-node))
   ))
 
 (defn- build-service-discovery
@@ -173,27 +131,9 @@
         si-with-port (if ssl? (.sslPort si port) (.port si port))]
     (.build si-with-port)))
 
-(defn- create-service-node
-  "create either passive or active node"
-  [session passivated? data-bytes name major minor micro]
-  (let [node-name (if passivated?
-                    (passive-service-node-pattern
-                     (:region @session)
-                     name
-                     major
-                     minor
-                     micro)
-                    (service-node-pattern
-                     (:region @session)
-                     name
-                     major
-                     minor
-                     micro))
-	client (:client @session)]
-    (zk/create-all client node-name :sequential? true :data data-bytes)))
-
 (declare watch-for-passivate)
 (declare watch-for-passivate-0)
+(declare watch-for-activate-0)
 
 (defn- register-instance
   [discovery instance]
@@ -204,96 +144,82 @@
   (-> discovery (.unregisterService instance)))
 
 (defn- activate-0
-  [fWork active-discovery passive-discovery instance]
-  (unregister-instance passive-discovery instance)
-  (register-instance active-discovery instance)
-  (watch-for-passivate-0 fWork active-discovery passive-discovery instance))
-
-(defn- activate
-  [session name major minor micro url passive-node event]
-  (if (= (:event-type event) :NodeCreated)
-    (let [created-node (:path event)
-          fWork (:fWork @session)
-          client (:client @session)
-          passive-data (:data (zk/data client passive-node))
-          node (create-service-node session false passive-data
-                                    name major minor micro)]
-      (zk/delete client passive-node)
-      (watch-for-passivate session name major minor micro url node)
-      (zk/delete client created-node)))
-  )
-
-(defn- watch-for-activate-0
-  [session instance])
-
-(defn- watch-for-activate
-  [session name major minor micro url passive-node]
-  (let [client (:client @session)
-	passive-exists (zk/exists client passive-node)]
-    (if passive-exists 
-      (let [activate-node (request-activation-node
-                           (:region @session)
-                           passive-node)]
-        (zk/exists client activate-node
-                   :watcher (partial activate session name major
-                                     minor micro url
-                                     passive-node))))))
-
-(defn- create-active-0
-  [session instance])
+  [fWork instance]
+  (let [region (-> instance service->payload-map :region)
+        active-discovery (activated-discovery fWork region)
+        passive-discovery (passivated-discovery fWork region)]
+    (unregister-instance passive-discovery instance)
+    (register-instance active-discovery instance)
+    (watch-for-passivate-0 fWork instance)))
 
 (defn- passivate-0
-  [session discovery instance]
-  (-> discovery (.unregisterService instance))
-  (create-active-0 session instance)
-  (watch-for-activate-0 session instance))
+  [fWork instance]
+  (let [region (-> instance service->payload-map :region)
+        active-discovery (activated-discovery fWork region)
+        passive-discovery (passivated-discovery fWork region)]
+    (unregister-instance active-discovery instance)
+    (register-instance passive-discovery instance)
+    (watch-for-activate-0 fWork instance)))
 
-(defn- passivate
-  [session name major minor micro url active-node event]
-  (if (= (:event-type event) :NodeCreated)
-    (let [created-node (:path event)
-          client (:client @session)
-          active-data (:data (zk/data client active-node))
-          node (create-service-node session true active-data
-                                    name major minor micro)]
-      (zk/delete client active-node)
-      (watch-for-activate session name major minor micro url node)
-      (zk/delete client created-node))
-    )
-  )
+(defn- activateWatcher
+  [fWork instance]
+  (proxy [com.netflix.curator.framework.api.CuratorWatcher] []
+    (process [event]
+      (do
+        (println (str "ACTIVATE WATCHER: " event))
+        (activate-0 fWork instance)))))
 
-(defn- passivate-watcher-0
-  [event]
-  ;; if event is node created ...
-  )
+(defn- passivateWatcher
+  [fWork instance]
+  (proxy [com.netflix.curator.framework.api.CuratorWatcher] []
+    (process [event]
+      (do
+        (println (str "PASSIVATE WATCHER: " event))
+        (passivate-0 fWork instance)))))
+
+(defn- watch-for-activate-0
+  [fWork instance]
+  (let [region (-> instance service->payload-map :region)
+        name (.getName instance)
+        id (.getId instance)
+        path (str "/requestactivation/" region "/" name "/" id)]
+    (-> fWork .checkExists (.usingWatcher
+                            (activateWatcher fWork instance)) (.forPath path))))
 
 (defn- watch-for-passivate-0
-  [fWork active-discovery passive-discovery instance]
-  (let [name (.getName instance)
-        id (.getName instance)
-        region (-> instance .getPayload :region)
-        active-exists (-> fWork .checkExists
-                          (.forPath (service-full-path "/services/"
-                                                       region name id)))]
-    (if active-exists
-      (let [passivate-node (service-full-path "/passivatedservices/"
-                                              region name id)]
-        (-> fWork .checkExists (.usingWatcher passivate-watcher-0)
-            (.forPath passivate-node))))))
+  [fWork instance]
+  (let [region (-> instance service->payload-map :region)
+        name (.getName instance)
+        id (.getId instance)
+        path (str "/requestpassivation/" region "/" name "/" id)]
+    (-> fWork .checkExists (.usingWatcher
+                            (passivateWatcher fWork instance)) (.forPath path))))
 
-(defn- watch-for-passivate
-  [session name major minor micro url active-node]
-  (let [fWork (:fWork @session)
-        client (:client @session)
-	active-exists (zk/exists client active-node)]
-    (if active-exists 
-      (let [passivate-node (request-passivation-node
-                            (:region @session)
-                            active-node)]
-        (zk/exists client passivate-node
-                   :watcher (partial passivate session name major
-                                     minor micro url
-                                     active-node))))))
+(defn- passivationRequestPath
+  [region name id]
+  (str "/requestpassivation/" region "/" name "/" id))
+
+(defn- activationRequestPath
+  [region name id]
+  (str "/requestactivation?" region "/" name "/" id))
+
+(defn- deletePassivationRequest
+  [fWork region name id]
+  (util/delete-path fWork (passivationRequestPath region name id)))
+
+(defn requestPassivation
+  [fWork region name id]
+  (-> fWork .create .creatingParentsIfNeeded
+      (.forPath (passivationRequestPath region name id))))
+
+(defn- deleteActivationRequest
+  [fWork region name id]
+  (util/delete-path fWork (activationRequestPath region name id)))
+
+(defn requestActivation
+  [fWork region name id]
+  (-> fWork .create .creatingParentsIfNeeded
+      (.forPath (str "/requestactivation/" region "/" name "/" id))))
 
 (defn registerService
   "returns the original zookeeper node created for this service
@@ -302,9 +228,13 @@
    unregister the service."
   [session ssl? serviceName major minor micro port uri url]
   (let [fWork (:fWork @session)
+        region (:region @session)
         client (:client @session)
 	cre-passivated (create-passivated? session serviceName)
         server-node (:instance @session)
+        discovery (if cre-passivated
+                    (passivated-discovery fWork region)
+                    (activated-discovery fWork region))
         instance (create-instance-0 ssl?
                                     (:region @session)
                                     server-node
@@ -316,7 +246,7 @@
                                     uri
                                     url)]
 
-    (register-instance (activated-discovery fWork (:region @session)) instance)
+    (register-instance discovery instance)
     (dosync
      (alter session add-service-to-session
             {(str serviceName "/" (.getId instance))
@@ -328,12 +258,11 @@
               :major major
               :minor minor
               :micro micro}}))
-    #_(if cre-passivated
+    (if cre-passivated
       ;; start watching for activate request
-      (watch-for-activate session serviceName major minor micro uri service-node)
+      (watch-for-activate-0 fWork instance)
       ;; else start watching for passivate requests
-      (watch-for-passivate session serviceName major minor micro uri service-node))
-    
+      (watch-for-passivate-0 fWork instance))
     instance
     ))
 
@@ -342,10 +271,10 @@
 
 (defn unregisterService
   [session service-node]
-  (let [client (:client @session)
+  (let [fWork (:fWork @session)
         service (:services @session)
         current-node (:current-node (service service-node))]
-    (zk/delete client service-node)
+    (util/delete-path fWork service-node)
     (dosync
      (alter session rm-service-from-session service-node))))
 
