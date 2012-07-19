@@ -71,12 +71,6 @@
   (let [services (:services session)]
     (assoc session :services (merge services service-def))))
 
-(defn- rm-service-from-session
-  [session service-node]
-  (let [services (:services session)
-        new-services (dissoc services service-node)]
-    (assoc session :services new-services)))
-
 (defn- create-passivated?
   [session service]
   (let [fWork (:fWork @session)
@@ -144,56 +138,72 @@
   (-> discovery (.unregisterService instance)))
 
 (defn- activate-0
-  [fWork instance]
-  (let [region (-> instance service->payload-map :region)
+  [session instance]
+  (let [fWork (:fWork @session)
+        name (.getName instance)
+        id (.getId instance)
+        service-key (str name "/" id)
+        region (-> instance service->payload-map :region)
         active-discovery (activated-discovery fWork region)
         passive-discovery (passivated-discovery fWork region)]
     (unregister-instance passive-discovery instance)
     (register-instance active-discovery instance)
-    (watch-for-passivate-0 fWork instance)))
+    (deleteActivationRequest fWork region name id)
+    (dosync
+     (alter session assoc-in [:services service-key :passive] nil))
+    (watch-for-passivate-0 session instance)))
 
 (defn- passivate-0
-  [fWork instance]
-  (let [region (-> instance service->payload-map :region)
+  [session instance]
+  (let [fWork (:fWork @session)
+        name (.getName instance)
+        id (.getId instance)
+        service-key (str name "/" id)
+        region (-> instance service->payload-map :region)
         active-discovery (activated-discovery fWork region)
         passive-discovery (passivated-discovery fWork region)]
     (unregister-instance active-discovery instance)
     (register-instance passive-discovery instance)
-    (watch-for-activate-0 fWork instance)))
+    (deletePassivationRequest fWork region name id)
+    (dosync
+     (alter session assoc-in [:services service-key :passive] true))
+    (watch-for-activate-0 session instance)))
 
 (defn- activateWatcher
-  [fWork instance]
+  [session instance]
   (proxy [com.netflix.curator.framework.api.CuratorWatcher] []
     (process [event]
       (do
         (println (str "ACTIVATE WATCHER: " event))
-        (activate-0 fWork instance)))))
+        (activate-0 session instance)))))
 
 (defn- passivateWatcher
-  [fWork instance]
+  [session instance]
   (proxy [com.netflix.curator.framework.api.CuratorWatcher] []
     (process [event]
       (do
         (println (str "PASSIVATE WATCHER: " event))
-        (passivate-0 fWork instance)))))
+        (passivate-0 session instance)))))
 
 (defn- watch-for-activate-0
-  [fWork instance]
-  (let [region (-> instance service->payload-map :region)
+  [session instance]
+  (let [fWork (:fWork @session)
+        region (-> instance service->payload-map :region)
         name (.getName instance)
         id (.getId instance)
         path (str "/requestactivation/" region "/" name "/" id)]
     (-> fWork .checkExists (.usingWatcher
-                            (activateWatcher fWork instance)) (.forPath path))))
+                            (activateWatcher session instance)) (.forPath path))))
 
 (defn- watch-for-passivate-0
-  [fWork instance]
-  (let [region (-> instance service->payload-map :region)
+  [session instance]
+  (let [fWork (:fWork @session)
+        region (-> instance service->payload-map :region)
         name (.getName instance)
         id (.getId instance)
         path (str "/requestpassivation/" region "/" name "/" id)]
     (-> fWork .checkExists (.usingWatcher
-                            (passivateWatcher fWork instance)) (.forPath path))))
+                            (passivateWatcher session instance)) (.forPath path))))
 
 (defn- passivationRequestPath
   [region name id]
@@ -214,6 +224,7 @@
 
 (defn- deleteActivationRequest
   [fWork region name id]
+  (println (str "CALLED DELETE ACTIVATION REQUEST: " (activationRequestPath region name id)))
   (util/delete-path fWork (activationRequestPath region name id)))
 
 (defn requestActivation
@@ -248,21 +259,22 @@
 
     (register-instance discovery instance)
     (dosync
-     (alter session add-service-to-session
-            {(str serviceName "/" (.getId instance))
-             {:uri uri
-              :passive cre-passivated
-              :instance instance
-              :name serviceName
-              :id (.getId instance)
-              :major major
-              :minor minor
-              :micro micro}}))
+     ;; add service to session
+     (alter session update-in [:services] assoc
+            (str serviceName "/" (.getId instance))
+            {:uri uri
+             :passive cre-passivated
+             :instance instance
+             :name serviceName
+             :id (.getId instance)
+             :major major
+             :minor minor
+             :micro micro}))
     (if cre-passivated
       ;; start watching for activate request
-      (watch-for-activate-0 fWork instance)
+      (watch-for-activate-0 session instance)
       ;; else start watching for passivate requests
-      (watch-for-passivate-0 fWork instance))
+      (watch-for-passivate-0 session instance))
     instance
     ))
 
@@ -270,21 +282,26 @@
   (registerService (.state this) serviceName major minor micro url))
 
 (defn unregisterService
-  [session service-node]
+  [session instance]
   (let [fWork (:fWork @session)
-        service (:services @session)
-        current-node (:current-node (service service-node))]
+        services (:services @session)
+        name (.getName instance)
+        id (.getId instance)
+        service-key (str name "/" id)
+        service-val (services service-key)
+        passive (:passive service-val)
+        service-node (util/service-node-path fWork passive (:region @session) name id)]
     (util/delete-path fWork service-node)
     (dosync
-     (alter session rm-service-from-session service-node))))
+     (alter session update-in [:services] dissoc service-key))))
 
-(defn -unregisterService [this service-node]
-  (unregisterService (.state this) service-node))
+(defn -unregisterService [this instance]
+  (unregisterService (.state this) instance))
 
 (defn unregisterAllServices
   [session]
-  (doseq [service (keys (:services @session))]
-    (unregisterService session service)))
+  (doseq [registration (vals (:services @session))]
+    (unregisterService session (:instance registration))))
 
 (defn -unregisterAllServices [this]
   (unregisterAllServices (.state this)))
